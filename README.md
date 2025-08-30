@@ -2,6 +2,8 @@
 
 适用于 nekro_agent 的 Stable Diffusion 绘图插件
 
+更新插件后若仍无法图生图，重启nakro-agent试一下
+
 ---
 
 ## 插件简介
