@@ -116,14 +116,15 @@ async def generate_image(
             "negative_prompt": params.n_prompt,
             "width": width,
             "height": height,
-            "steps": 20,
-            "sampler_name": "DPM++ 2M",
+            "steps": config.STEPS,
+            "sampler_name": config.SAMPLER_NAME,
             "cfg_scale": 7,
             "batch_size": 1,
             "n_iter": 1,
             "seed": -1,
             "send_images": True,
             "save_images": False,
+            "denoising_strength": config.DENOISING_STRENGTH,
         }
     else:
         # 文生图请求
@@ -133,8 +134,8 @@ async def generate_image(
             "negative_prompt": params.n_prompt,
             "width": width,
             "height": height,
-            "steps": 20,
-            "sampler_name": "DPM++ 2M",
+            "steps": config.STEPS,
+            "sampler_name": config.SAMPLER_NAME,
             "cfg_scale": 7,
             "batch_size": 1,
             "n_iter": 1,

@@ -37,6 +37,25 @@ class StableDiffusionDrawConfig(ConfigBase):
         description="图像宽度或高度的最大允许像素值。例如，如果设置为2048，则宽度和高度都不能超过2048像素。",
         ge=256,  # 维度必须大于等于256
     )
+    STEPS: int = Field(
+        default=20,
+        title="生成步数",
+        description="采样迭代步数，影响生成质量和速度。",
+        ge=1,
+        le=150,
+    )
+    SAMPLER_NAME: str = Field(
+        default="DPM++ 2M",
+        title="采样器名称",
+        description="Stable Diffusion 采样器名称，如 DPM++ 2M、Euler a、DDIM 等。",
+    )
+    DENOISING_STRENGTH: float = Field(
+        default=0.3,
+        title="降噪强度",
+        description="图生图时的降噪强度，推荐范围0.2~0.8。",
+        ge=0.0,
+        le=1.0,
+    )
 
 
 # 获取配置实例
