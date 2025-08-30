@@ -50,7 +50,7 @@ class StableDiffusionDrawConfig(ConfigBase):
         description="Stable Diffusion 采样器名称，如 DPM++ 2M、Euler a、DDIM 等。",
     )
     DENOISING_STRENGTH: float = Field(
-        default=0.3,
+        default=0.6,
         title="降噪强度",
         description="图生图时的降噪强度，推荐范围0.2~0.8。",
         ge=0.0,
