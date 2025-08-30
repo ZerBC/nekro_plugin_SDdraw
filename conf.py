@@ -6,7 +6,7 @@ from pydantic import Field
 plugin = NekroPlugin(
     name="stable_diffusion绘图",
     module_name="stable_diffusion_draw",
-    description="基于stable-diffusion api的绘图插件",
+    description="基于stable-diffusion api的绘图插件,支持文生图和图生图。",
     version="0.1.1", 
     author="ZerBC",
     url="https://github.com/ZerBC/nekro_plugin_SDdraw",

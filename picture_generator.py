@@ -18,9 +18,28 @@ class ImageGenerationRequestParams(BaseModel):
     用于验证和解析图像生成请求参数的内部模型。
     确保所有必要的参数都存在且格式正确。
     """
-    p_prompt: str = Field(description="正向提示词：描述所有您希望出现在图像中的元素，尽可能详细，使用英文。")
-    n_prompt: str = Field(description="负向提示词：描述所有您不希望出现在图像中的元素，尽可能详细，使用英文。")
-    size: str = Field(description="图像尺寸，格式为 '宽*高'，例如 '640*980'。")
+    p_prompt: str = Field(..., description="正向提示词：描述所有您希望出现在图像中的元素，尽可能详细，使用英文。")
+    n_prompt: str = Field(..., description="负向提示词：描述所有不希望出现在图像中的元素，尽可能详细，使用英文。")
+    size: str = Field(..., description="图像尺寸，格式为 '宽*高'，例如 '640*980'。")
+    refer_image: str = Field('', description="图生成时参考图像的URL或base64（可选，图生图时必填）")
+
+    @classmethod
+    def validate_params(cls, p_prompt, n_prompt, size, refer_image):
+        # 校验 size 格式
+        try:
+            width_str, height_str = size.split('*')
+            width, height = int(width_str), int(height_str)
+        except Exception:
+            raise ValueError(f"尺寸格式 '{size}' 不正确，应为 '宽*高'")
+        if not (0 < width <= config.MAX_IMAGE_DIMENSION and 0 < height <= config.MAX_IMAGE_DIMENSION):
+            raise ValueError(
+                f"请求的图像尺寸 {width}x{height} 无效或超出最大限制 "
+                f"({config.MAX_IMAGE_DIMENSION}x{config.MAX_IMAGE_DIMENSION})。"
+            )
+        # 图生图时必须有本地图片路径
+        if refer_image and not isinstance(refer_image, str):
+            raise ValueError("图生图模式下，refer_image 必须为本地图片路径字符串。")
+        return width, height
 
 
 
@@ -28,16 +47,18 @@ class ImageGenerationRequestParams(BaseModel):
 @plugin.mount_sandbox_method(
     SandboxMethodType.TOOL,  
     name="生成图片",
-    description="使用 Stable Diffusion API 生成图片，并直接返回图片数据。", 
+    description="使用 Stable Diffusion API 生成图片，支持文生图和图生图。", 
 )
 async def generate_image(
     _ctx: AgentCtx,
     p_prompt: str,
     n_prompt: str,
     size: str,
+    refer_image: str = "",
 ) -> bytes: # 修改: 返回值类型改为 bytes
     """使用 Stable Diffusion API 生成图片，并直接返回PNG格式图片二进制数据。
     根据对话者说的话推断他想要的图像，生成下面的提示词。
+    支持文生图和图生图两种模式，图生图时必须提供参考图像。
     函数执行完毕后需将返回的二进制数据转成图片发出。
 
     Args:
@@ -46,6 +67,7 @@ async def generate_image(
         n_prompt: 负向提示词 (Negative Prompt)，详细描述所有不希望出现在图像中的元素、缺陷等，
                   使用英文表达，越详细越好。
         size: 图像尺寸，格式为 '宽*高'。必须是整数。
+        refer_image: 图生成时参考图像的URL，图生图时必填，本地路径字符串
 
     Returns:
         bytes: 生成的PNG格式图片二进制数据。
@@ -61,35 +83,65 @@ async def generate_image(
         send_msg_file(_ck, './shared/anime_girl.png')
     """
     # 1. 输入参数验证和解析
+    # 只支持本地文件路径，直接读取并转base64
+    refer_image_data = refer_image
+    if refer_image:
+        try:
+            refer_image = _ctx.fs.get_file(refer_image)
+            with open(refer_image, 'rb') as f:
+                img_bytes = f.read()
+            refer_image_data = base64.b64encode(img_bytes).decode('utf-8')
+        except Exception as e:
+            logger.error(f"读取参考图片文件失败: {refer_image}, 错误: {e}")
+            raise ValueError(f"图生图参考图片文件读取失败: {refer_image}")
+
     try:
-        params = ImageGenerationRequestParams(p_prompt=p_prompt, n_prompt=n_prompt, size=size)
-        width_str, height_str = params.size.split('*')
-        width, height = int(width_str), int(height_str)
-        if not (0 < width <= config.MAX_IMAGE_DIMENSION and 0 < height <= config.MAX_IMAGE_DIMENSION):
-            raise ValueError(
-                f"请求的图像尺寸 {width}x{height} 无效或超出最大限制 "
-                f"({config.MAX_IMAGE_DIMENSION}x{config.MAX_IMAGE_DIMENSION})。"
-            )
+        params = ImageGenerationRequestParams(p_prompt=p_prompt, n_prompt=n_prompt, size=size, refer_image=refer_image_data)
+        width, height = ImageGenerationRequestParams.validate_params(p_prompt, n_prompt, size, refer_image_data)
     except ValueError as e:
-        logger.warning(f"绘图尺寸参数无效: size='{size}'. 错误: {e}")
-        # 修改: 抛出异常而不是返回字符串，由框架统一处理错误
-        raise ValueError(f"绘图失败：尺寸格式 '{size}' 不正确或超出范围。请使用 '宽*高' 格式，并确保不超出最大限制。")
+        logger.warning(f"绘图参数无效: {e}")
+        raise ValueError(f"绘图失败：{e}")
     except ValidationError as e:
         error_messages = "; ".join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
         logger.warning(f"绘图参数验证失败: {error_messages}")
         raise ValueError(f"绘图参数错误：{error_messages}")
 
     # 2. 构建 Stable Diffusion API 请求体
-    api_endpoint = f"{config.API_URL.rstrip('/')}/sdapi/v1/txt2img"
-    payload: Dict[str, Any] = {
-        "prompt": params.p_prompt,
-        "negative_prompt": params.n_prompt,
-        "width": width,
-        "height": height,
-        "steps": 20, "sampler_name": "DPM++ 2M Karras", "cfg_scale": 7,
-        "batch_size": 1, "n_iter": 1, "seed": -1,
-        "send_images": True, "save_images": False,
-    }
+    if refer_image_data:
+        # 图生图请求
+        api_endpoint = f"{config.API_URL.rstrip('/')}/sdapi/v1/img2img"
+        payload: Dict[str, Any] = {
+            "init_images": [refer_image_data],
+            "prompt": params.p_prompt,
+            "negative_prompt": params.n_prompt,
+            "width": width,
+            "height": height,
+            "steps": 20,
+            "sampler_name": "DPM++ 2M",
+            "cfg_scale": 7,
+            "batch_size": 1,
+            "n_iter": 1,
+            "seed": -1,
+            "send_images": True,
+            "save_images": False,
+        }
+    else:
+        # 文生图请求
+        api_endpoint = f"{config.API_URL.rstrip('/')}/sdapi/v1/txt2img"
+        payload: Dict[str, Any] = {
+            "prompt": params.p_prompt,
+            "negative_prompt": params.n_prompt,
+            "width": width,
+            "height": height,
+            "steps": 20,
+            "sampler_name": "DPM++ 2M",
+            "cfg_scale": 7,
+            "batch_size": 1,
+            "n_iter": 1,
+            "seed": -1,
+            "send_images": True,
+            "save_images": False,
+        }
 
     # 3. 发送 API 请求并处理响应
     try:
